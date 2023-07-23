@@ -1,0 +1,47 @@
+<form action="/register" method="post">
+  <label for="userid">User ID:</label>
+  <input type="text" id="userid" name="userid" required><br><br>
+
+  <label for="email">Email:</label>
+  <input type="email" id="email" name="email" required><br><br>
+
+  <label for="password">Password:</label>
+  <input type="password" id="password" name="password" required><br><br>
+
+  <button type="button" onclick="generateKey()">Generate Registration Key</button><br><br>
+
+  <input type="text" id="registrationKey" name="registrationKey" readonly><br><br>
+
+  <input type="submit" value="Submit">
+</form>
+
+<script>
+  function generateKey() {
+    const userid = document.getElementById("userid").value;
+    const password = document.getElementById("password").value;
+
+    // Generate registration key
+    const registrationKey = generateRandomKey(10); // Specify the desired length of the key
+
+    // Display the registration key
+    document.getElementById("registrationKey").value = registrationKey;
+
+    // Set the registration key as a hidden input value
+    document.getElementById("registrationKey").hidden = false;
+
+    // Store the registration key in the form data
+    document.getElementById("registrationKey").value = registrationKey;
+  }
+
+  function generateRandomKey(length) {
+    const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let key = "";
+
+    for (let i = 0; i < length; i++) {
+      const randomIndex = Math.floor(Math.random() * characters.length);
+      key += characters.charAt(randomIndex);
+    }
+
+    return key;
+  }
+</script>
