@@ -1,8 +1,10 @@
 const express = require("express");
+const ngrok = require("ngrok");
 const sql = require("msnodesqlv8");
 const session = require("express-session");
 const app = express();
 const bodyParser = require("body-parser");
+const bcrypt = require("bcrypt");
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
@@ -19,6 +21,9 @@ app.use(
 const connectionString =
   "Driver={SQL Server};Server=103.190.54.22\\SQLEXPRESS,1633;Database=hrms_app;Uid=ecohrms;Pwd=EcoHrms@123;";
 
+
+app.use(express.static("mssqlserver"));
+app.use(express.static("/register.html"));
 // Function to generate a random key of specified length
 function generateRandomKey(length) {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -33,10 +38,13 @@ app.get("/", (req, res) => {
   res.sendFile(__dirname + "/login.html");
 });
 
-app.post("/login", (req, res) => {
-  const { userid, email, RegistrationKey } = req.body;
+app.get("/register", (req, res) => {
+  res.sendFile(__dirname + "/register.html");
+});
 
-  // Check the status of the registration key
+app.post("/login", (req, res) => {
+  const { userid, password, RegistrationKey } = req.body;
+
   const checkKeyQuery = `SELECT status FROM ecohrms.RegistrationKeys WHERE userid='${userid}' AND RegistrationKey='${RegistrationKey}'`;
 
   sql.query(connectionString, checkKeyQuery, (err, results) => {
@@ -48,11 +56,9 @@ app.post("/login", (req, res) => {
     if (results.length === 1) {
       const keyStatus = results[0].status.trim();
 
-      // If the registration key is deactivated, return an error message
       if (keyStatus === 'D') {
         return res.status(401).send("Your account is deactivated");
       } else if (keyStatus === 'R' || keyStatus === 'A') {
-        // If the registration key is registered or active, proceed with the login process
         const checkUserQuery = `SELECT * FROM ecohrms.userdata WHERE userid='${userid}' AND status='${keyStatus}'`;
 
         sql.query(connectionString, checkUserQuery, (err, results) => {
@@ -63,40 +69,27 @@ app.post("/login", (req, res) => {
 
           if (results.length === 1) {
             const user = results[0];
-            const storedPassword = user.password.trim();
-            const inputPassword = req.body.password.trim(); // Extract password from request body
+            const storedPassword = user.password;
+            const inputPassword = password;
 
-            if (storedPassword === inputPassword) {
-              // Set the session variables
-              req.session.isLoggedIn = true;
-              req.session.userid = userid;
+            bcrypt.compare(inputPassword, storedPassword, (bcryptErr, isMatch) => {
+              if (bcryptErr) {
+                console.log(bcryptErr);
+                return res.status(500).send("An error occurred");
+              }
 
-              // Update the status of the user in ecohrms.userdata to 'A' (active)
-              const updateUserStatusQuery = `UPDATE ecohrms.userdata SET status='A' WHERE userid='${userid}'`;
+              if (isMatch) {
+                // Set the session variables
+                req.session.isLoggedIn = true;
+                req.session.userid = userid;
 
-              sql.query(connectionString, updateUserStatusQuery, (err) => {
-                if (err) {
-                  console.error("Error updating user status in ecohrms.userdata:", err);
-                  return res.status(500).json({ error: "Internal server error" });
-                }
-
-                // Update the status of the registration key to 'A' (active) in ecohrms.RegistrationKeys
-                const updateKeyStatusQuery = `UPDATE ecohrms.RegistrationKeys SET status='A' WHERE userid='${userid}' AND RegistrationKey='${RegistrationKey}'`;
-
-                sql.query(connectionString, updateKeyStatusQuery, (err) => {
-                  if (err) {
-                    console.error("Error updating registration key status in ecohrms.RegistrationKeys:", err);
-                    return res.status(500).json({ error: "Internal server error" });
-                  }
-
-                  console.log("Login successful for user:", userid);
-                  return res.send("Login successful");
-                });
-              });
-            } else {
-              console.log("Invalid password for user:", userid);
-              return res.status(401).send("Invalid Credentials!");
-            }
+                console.log("Login successful for user:", userid);
+                return res.send("Login successful");
+              } else {
+                console.log("Invalid password for user:", userid);
+                return res.status(401).send("Invalid Credentials!");
+              }
+            });
           } else {
             console.log("Invalid username or inactive account for user:", userid);
             return res.status(401).send("Invalid Credentials!");
@@ -110,90 +103,70 @@ app.post("/login", (req, res) => {
   });
 });
 
-
-// ... (existing code)
-
 // Add the /register endpoint
 app.post("/register", (req, res) => {
   const { userid, email, password } = req.body;
 
-  // Check if the user already exists in ecohrms.userdata
-  const checkUserQuery = `SELECT COUNT(*) AS count FROM ecohrms.userdata WHERE userid='${userid}'`;
+  console.log("Request body:",req.body);
 
-  sql.query(connectionString, checkUserQuery, (error, results) => {
-    if (error) {
-      console.error("Error checking user:", error);
-      res.status(500).json({ error: "Internal server error" });
-    } else {
-      const userCount = results[0].count;
+  // Check if userid or email already exists
+  const checkQuery = `SELECT * FROM ecohrms.userdata WHERE userid='${userid}' OR email='${email}'`;
+  sql.query(connectionString, checkQuery, (checkErr, checkRows) => {
+    if (checkErr) {
+      console.log(checkErr);
+      return res.status(500).send("An error occurred");
+    }
 
-      if (userCount > 0) {
-        // User already exists, generate a new unique registration key
-        const newRegistrationKey = generateRandomKey(10);
+    if (checkRows.length > 0) {
+      return res.status(409).send("User already exists");
+    }
 
-        // Update the status of the previous registration keys to 'D' (deactivated) in ecohrms.RegistrationKeys
-        const updatePreviousKeyStatusQuery = `UPDATE ecohrms.RegistrationKeys SET status='D' WHERE userid='${userid}'`;
-
-        sql.query(connectionString, updatePreviousKeyStatusQuery, (error, results) => {
-          if (error) {
-            console.error("Error updating previous registration key status in ecohrms.RegistrationKeys:", error);
-            return res.status(500).json({ error: "Internal server error" });
+    // Generate a salt for password hashing
+    bcrypt.genSalt(10, (saltErr, salt) => {
+      if (saltErr) {
+        console.log(saltErr);
+        return res.status(500).send("An error occurred");
+      }
+  
+      // Hash the user's password with the salt
+      bcrypt.hash(password, salt, (hashErr, hashPassword) => {
+        if (hashErr) {
+          console.log(hashErr);
+          return res.status(500).send("An error occurred during hashing");
+        }
+  
+        // Store the user details in ecohrms.userdata with hashed password
+        const insertUserQuery = "INSERT INTO ecohrms.userdata (userid, email, password, status) VALUES (?, ?, ?, 'R')";
+        const userValues = [userid, email, hashPassword];
+  
+        sql.query(connectionString, insertUserQuery, userValues, (insertErr, insertResult) => {
+          if (insertErr) {
+            console.log(insertErr);
+            return res.status(500).send("An error occurred");
           }
-
+  
+          // Generate a new registration key
+          const newRegistrationKey = generateRandomKey(10);
+  
           // Save the new registration key in ecohrms.RegistrationKeys with status 'R' (registered)
           const insertRegistrationKeyQuery = `INSERT INTO ecohrms.RegistrationKeys (userid, registrationKey, status) VALUES (?, ?, 'R')`;
           const registrationKeyValues = [userid, newRegistrationKey];
-
-          sql.query(connectionString, insertRegistrationKeyQuery, registrationKeyValues, (error, results) => {
-            if (error) {
-              console.error("Error saving registration key in ecohrms.RegistrationKeys:", error);
-              return res.status(500).json({ error: "Internal server error" });
+  
+          sql.query(connectionString, insertRegistrationKeyQuery, registrationKeyValues, (keyErr, keyResult) => {
+            if (keyErr) {
+              console.log(keyErr);
+              return res.status(500).send("An error occurred");
             }
-
-            // Update the status of the user in ecohrms.userdata to 'R' (registered)
-            const updateUserStatusQuery = `UPDATE ecohrms.userdata SET status='R' WHERE userid='${userid}'`;
-
-            sql.query(connectionString, updateUserStatusQuery, (error, results) => {
-              if (error) {
-                console.error("Error updating user status in ecohrms.userdata:", error);
-                return res.status(500).json({ error: "Internal server error" });
-              }
-
-              res.json({ registrationKey: newRegistrationKey });
-            });
+  
+            // Send the registration key as a response
+            res.json({ registrationKey: newRegistrationKey });
           });
         });
-      } else {
-        // User does not exist, generate a registration key
-        const registrationKey = generateRandomKey(10);
-
-        // Store the user details in ecohrms.userdata with status 'R' (registered)
-        const insertUserQuery = "INSERT INTO ecohrms.userdata (userid, email, password, status) VALUES (?, ?, ?, 'R')";
-        const userValues = [userid, email, password];
-
-        sql.query(connectionString, insertUserQuery, userValues, (error, userResults) => {
-          if (error) {
-            console.error("Error storing user details in ecohrms.userdata:", error);
-            res.status(500).json({ error: "Internal server error" });
-          } else {
-            // Save the new registration key in ecohrms.RegistrationKeys with status 'R' (registered)
-            const insertRegistrationKeyQuery = `INSERT INTO ecohrms.RegistrationKeys (userid, registrationKey, status) VALUES (?, ?, 'R')`;
-            const registrationKeyValues = [userid, registrationKey];
-
-            sql.query(connectionString, insertRegistrationKeyQuery, registrationKeyValues, (error, results) => {
-              if (error) {
-                console.error("Error saving registration key in ecohrms.RegistrationKeys:", error);
-                return res.status(500).json({ error: "Internal server error" });
-              }
-
-              res.send("Registration successful");
-            });
-          }
-        });
-      }
-    }
+      });
+    });
   });
 });
+
 
 
 //get all data
@@ -383,7 +356,21 @@ app.delete("/Emp/:userid", (req, res) => {
   });
 });
 
-// Start the server
-app.listen(3009, () => {
+
+const server = app.listen(3009, () => {
   console.log("Server listening on port 3009");
+  
+  // Start ngrok to expose the server
+  (async () => {
+    try {
+      const ngrokUrl = await ngrok.connect({
+        addr: 3009, // Your server is running on port 3009
+        authtoken: '2TyMw9yoVVPNgKzPYLYEMRvmdjT_7W6vh74gxnftaGMwcTUYD', // Replace with your ngrok auth token
+        region: 'us', // Choose a region
+      });
+      console.log("Ngrok URL:", ngrokUrl);
+    } catch (error) {
+      console.error("Error starting ngrok:", error);
+    }
+  })();
 });

@@ -1,4 +1,4 @@
-<form action="/register" method="post">
+<form action="https://localhost:3009/register" method="POST" id="registerForm">
   <label for="userid">User ID:</label>
   <input type="text" id="userid" name="userid" required><br><br>
 
@@ -17,10 +17,6 @@
 
 <script>
   function generateKey() {
-    const userid = document.getElementById("userid").value;
-    const password = document.getElementById("password").value;
-
-    // Generate registration key
     const registrationKey = generateRandomKey(10); // Specify the desired length of the key
 
     // Display the registration key
@@ -28,9 +24,6 @@
 
     // Set the registration key as a hidden input value
     document.getElementById("registrationKey").hidden = false;
-
-    // Store the registration key in the form data
-    document.getElementById("registrationKey").value = registrationKey;
   }
 
   function generateRandomKey(length) {
@@ -43,5 +36,5 @@
     }
 
     return key;
-  }
+  }
 </script>
