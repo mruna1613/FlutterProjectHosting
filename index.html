@@ -7,7 +7,7 @@
 </head>
 <body>
   <h1>Login</h1>
-  <form action="http://localhost:3009/login" method="POST">
+  <form action="/login" method="POST">
     <div>
       <label for="userid">USER_ID:</label>
       <input type="text" id="userid" name="userid" required>
@@ -18,7 +18,7 @@
     </div>
     <div>
       <label for="RegistrationKey">Registration Key:</label>
-      <input type="RegistrationKey" id="RegistrationKey" name="RegistrationKey" required>
+      <input type="RegistrationKey" name="RegistrationKey" placeholder="RegistrationKey" required>
     </div>
     <button type="submit">Login</button>
   </form>

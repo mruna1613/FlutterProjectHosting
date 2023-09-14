@@ -5,6 +5,16 @@ const session = require("express-session");
 const app = express();
 const bodyParser = require("body-parser");
 const bcrypt = require("bcrypt");
+const nodemailer = require("nodemailer");
+
+// const{server}=require('ws');
+// const sss = new server({server});
+// wss.on('connection',ws=>{
+//   console.log('client connected');
+//   ws.send(JSON.stringify({'message':'hello'}));
+//   })
+//   app.use("/static", express.static(__dirname + "/main.dart"));
+
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
@@ -17,13 +27,11 @@ app.use(
     saveUninitialized: true,
   })
 );
-
 const connectionString =
   "Driver={SQL Server};Server=103.190.54.22\\SQLEXPRESS,1633;Database=hrms_app;Uid=ecohrms;Pwd=EcoHrms@123;";
 
 
 app.use(express.static("mssqlserver"));
-app.use(express.static("/register.html"));
 // Function to generate a random key of specified length
 function generateRandomKey(length) {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -35,11 +43,11 @@ function generateRandomKey(length) {
 }
 
 app.get("/", (req, res) => {
-  res.sendFile(__dirname + "/login.html");
+  res.sendFile(__dirname + "/index.html");//flutter_hrms/flutter_application_1/lib/main.dart
 });
 
 app.get("/register", (req, res) => {
-  res.sendFile(__dirname + "/register.html");
+  res.sendFile(__dirname + "/register.html");//flutter_hrms/flutter_application_1/lib/main.dart
 });
 
 app.post("/login", (req, res) => {
@@ -49,7 +57,7 @@ app.post("/login", (req, res) => {
 
   sql.query(connectionString, checkKeyQuery, (err, results) => {
     if (err) {
-      console.log(err);
+      console.error(err);
       return res.status(500).send("An error occurred");
     }
 
@@ -63,7 +71,7 @@ app.post("/login", (req, res) => {
 
         sql.query(connectionString, checkUserQuery, (err, results) => {
           if (err) {
-            console.log(err);
+            console.error(err);
             return res.status(500).send("An error occurred");
           }
 
@@ -72,9 +80,10 @@ app.post("/login", (req, res) => {
             const storedPassword = user.password;
             const inputPassword = password;
 
+            // Compare hashed password
             bcrypt.compare(inputPassword, storedPassword, (bcryptErr, isMatch) => {
               if (bcryptErr) {
-                console.log(bcryptErr);
+                console.error(bcryptErr);
                 return res.status(500).send("An error occurred");
               }
 
@@ -107,65 +116,68 @@ app.post("/login", (req, res) => {
 app.post("/register", (req, res) => {
   const { userid, email, password } = req.body;
 
-  console.log("Request body:",req.body);
+  // Generate a new registration key
+  const newRegistrationKey = generateRandomKey(10);
 
-  // Check if userid or email already exists
-  const checkQuery = `SELECT * FROM ecohrms.userdata WHERE userid='${userid}' OR email='${email}'`;
-  sql.query(connectionString, checkQuery, (checkErr, checkRows) => {
-    if (checkErr) {
-      console.log(checkErr);
-      return res.status(500).send("An error occurred");
+  // Hash the user's password
+  bcrypt.hash(password, 10, (hashErr, hashedPassword) => {
+    if (hashErr) {
+      console.error("Error hashing password:", hashErr);
+      return res.status(500).send("An error occurred while hashing the password");
     }
 
-    if (checkRows.length > 0) {
-      return res.status(409).send("User already exists");
-    }
+    // Continue with registration after hashing the password
+    const transporter = nodemailer.createTransport({
+      service: "Gmail",
+      auth: {
+        user: "rutuja.22110140@viit.ac.in",
+        pass: "zalpwsjzrxksvslk",
+      },
+    });
 
-    // Generate a salt for password hashing
-    bcrypt.genSalt(10, (saltErr, salt) => {
-      if (saltErr) {
-        console.log(saltErr);
-        return res.status(500).send("An error occurred");
+    // Define the email message
+    const mailOptions = {
+      from: "rutuja.22110140@viit.ac.in",
+      to: email,
+      subject: "Registration Key",
+      text: `Your registration key is: ${newRegistrationKey}`,
+    };
+
+    // Send the email
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error("Error sending email:", error);
+        return res.status(500).send("An error occurred while sending the email");
       }
-  
-      // Hash the user's password with the salt
-      bcrypt.hash(password, salt, (hashErr, hashPassword) => {
-        if (hashErr) {
-          console.log(hashErr);
-          return res.status(500).send("An error occurred during hashing");
+
+      // Store the new registration key and hashed password in the database
+      const insertRegistrationKeyQuery = `INSERT INTO ecohrms.RegistrationKeys (userid, registrationKey, status) VALUES (?, ?, 'R')`;
+      const registrationKeyValues = [userid, newRegistrationKey];
+
+      sql.query(connectionString, insertRegistrationKeyQuery, registrationKeyValues, (keyErr, keyResult) => {
+        if (keyErr) {
+          console.error(keyErr);
+          return res.status(500).send("An error occurred");
         }
-  
-        // Store the user details in ecohrms.userdata with hashed password
+
+        // Now, store the user details in ecohrms.userdata with hashed password
         const insertUserQuery = "INSERT INTO ecohrms.userdata (userid, email, password, status) VALUES (?, ?, ?, 'R')";
-        const userValues = [userid, email, hashPassword];
-  
+        const userValues = [userid, email, hashedPassword]; // Store the hashed password
+
         sql.query(connectionString, insertUserQuery, userValues, (insertErr, insertResult) => {
           if (insertErr) {
-            console.log(insertErr);
+            console.error(insertErr);
             return res.status(500).send("An error occurred");
           }
-  
-          // Generate a new registration key
-          const newRegistrationKey = generateRandomKey(10);
-  
-          // Save the new registration key in ecohrms.RegistrationKeys with status 'R' (registered)
-          const insertRegistrationKeyQuery = `INSERT INTO ecohrms.RegistrationKeys (userid, registrationKey, status) VALUES (?, ?, 'R')`;
-          const registrationKeyValues = [userid, newRegistrationKey];
-  
-          sql.query(connectionString, insertRegistrationKeyQuery, registrationKeyValues, (keyErr, keyResult) => {
-            if (keyErr) {
-              console.log(keyErr);
-              return res.status(500).send("An error occurred");
-            }
-  
-            // Send the registration key as a response
-            res.json({ registrationKey: newRegistrationKey });
-          });
+
+          // Send the registration key as a JSON response
+          res.json({ registrationKey: newRegistrationKey });
         });
       });
     });
   });
 });
+
 
 
 
